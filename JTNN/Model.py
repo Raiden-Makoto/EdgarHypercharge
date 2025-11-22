@@ -7,7 +7,6 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 import copy
-import math
 import rdkit
 import rdkit.Chem as Chem
 from .moltree import Vocab, MolTree

@@ -8,7 +8,6 @@ import mlx.nn as nn
 from .moltree import Vocab, MolTree, MolTreeNode
 from .mlxutils import create_var, GRU
 from .chemutils import enum_assemble, set_atommap
-import copy
 
 MAX_NB = 15
 MAX_DECODE_LEN = 100
@@ -19,7 +18,7 @@ def cross_entropy_loss(logits, targets):
     # logits: (batch, num_classes)
     # targets: (batch,) with class indices
     batch_size = logits.shape[0]
-    log_probs = mx.log_softmax(logits, axis=1)
+    log_probs = nn.log_softmax(logits, axis=1)
     # Gather log probabilities for target classes
     batch_indices = mx.arange(batch_size)
     target_log_probs = log_probs[batch_indices, targets]

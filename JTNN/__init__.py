@@ -11,10 +11,11 @@ __all__ = [
     'chemutils',
     'vocab',
     'moltree',
-    'moltree_node',
+    'MolTreeNode',
+    'MolTree',
     'mlxutils',
     'JTNNEncoder',
-    'JTNNmpnn',
+    'JTMPN',
     'JTNNDecoder',
     'JTNNVAE'
 ]

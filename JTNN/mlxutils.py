@@ -4,7 +4,6 @@ Converted from PyTorch to Apple MLX for Apple Silicon acceleration.
 """
 
 import mlx.core as mx
-import mlx.nn as nn
 
 
 def create_var(array, requires_grad=None):
