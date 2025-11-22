@@ -30,20 +30,20 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    '--hidden_size', type=int, default=450,
-    help='Hidden size (must match training)'
+    '--hidden_size', type=int, default=32,
+    help='Hidden size (default: 32 for ~100K params, must match training)'
 )
 parser.add_argument(
-    '--latent_size', type=int, default=56,
-    help='Latent size (must match training)'
+    '--latent_size', type=int, default=8,
+    help='Latent size (default: 8 for ~100K params, must match training)'
 )
 parser.add_argument(
-    '--depthT', type=int, default=20,
-    help='Tree depth (must match training)'
+    '--depthT', type=int, default=3,
+    help='Tree depth (default: 3 for ~100K params, must match training)'
 )
 parser.add_argument(
-    '--depthG', type=int, default=3,
-    help='Graph depth (must match training)'
+    '--depthG', type=int, default=2,
+    help='Graph depth (default: 2 for ~100K params, must match training)'
 )
 parser.add_argument(
     '--prob_decode', action='store_true',
