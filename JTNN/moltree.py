@@ -153,15 +153,33 @@ def dfs(node, fa_idx):
 
 if __name__ == "__main__":
     import sys
+    import warnings
+    
+    # Suppress all warnings
+    warnings.filterwarnings('ignore')
     
     lg = rdkit.RDLogger.logger()
     lg.setLevel(rdkit.RDLogger.CRITICAL)
 
     cset = set()
+    processed = 0
+    skipped = 0
+    
+    # Process all molecules silently
     for line in sys.stdin:
-        smiles = line.split()[0]
-        mol = MolTree(smiles)
-        for c in mol.nodes:
-            cset.add(c.smiles)
-    for x in cset:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            smiles = line.split()[0]
+            mol = MolTree(smiles)
+            for c in mol.nodes:
+                cset.add(c.smiles)
+            processed += 1
+        except Exception:
+            skipped += 1
+            continue
+    
+    # Only output vocabulary SMILES to stdout (for redirection to vocab.txt)
+    for x in sorted(cset):
         print(x)

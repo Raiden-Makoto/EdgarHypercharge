@@ -79,9 +79,9 @@ class JTNNVAE(nn.Module):
             mol_vecs = mx.zeros((tree_vecs.shape[0], self.hidden_size))
         else:
             # If MPN is implemented, use it here
-            mol_vecs = self.mpn(*mpn_holder)
+        mol_vecs = self.mpn(*mpn_holder)
         return tree_vecs, tree_mess, mol_vecs
-
+    
     def encode_from_smiles(self, smiles_list):
         """
         Encode SMILES strings to latent representations.
@@ -115,7 +115,7 @@ class JTNNVAE(nn.Module):
         if mpn_holder is None:
             mol_vecs = mx.zeros((tree_vecs.shape[0], self.hidden_size))
         else:
-            mol_vecs = self.mpn(*mpn_holder)
+        mol_vecs = self.mpn(*mpn_holder)
         tree_mean = self.T_mean(tree_vecs)
         mol_mean = self.G_mean(mol_vecs)
         tree_var = -mx.abs(self.T_var(tree_vecs))
@@ -234,7 +234,7 @@ class JTNNVAE(nn.Module):
         cand_vecs_expanded = mx.expand_dims(cand_vecs, axis=-1)  # (batch, hidden, 1)
         scores_mat = mx.matmul(x_mol_expanded, cand_vecs_expanded)  # (batch, 1, 1)
         scores = mx.squeeze(scores_mat, axis=(1, 2))  # (batch,)
-
+        
         cnt, tot, acc = 0, 0, 0
         all_loss = []
         for i, mol_tree in enumerate(mol_batch):
@@ -318,7 +318,7 @@ class JTNNVAE(nn.Module):
             tree_mess, x_mol_vecs, pred_nodes, cur_mol, global_amap, [],
             pred_root, None, prob_decode, check_aroma=True
         )
-        if cur_mol is None:
+        if cur_mol is None: 
             cur_mol = copy_edit_mol(pred_root.mol)
             global_amap = [{}] + [{} for node in pred_nodes]
             global_amap[1] = {
@@ -332,7 +332,7 @@ class JTNNVAE(nn.Module):
             if cur_mol is None:
                 cur_mol = pre_mol
 
-        if cur_mol is None:
+        if cur_mol is None: 
             return None
 
         cur_mol = cur_mol.GetMol()
@@ -342,7 +342,7 @@ class JTNNVAE(nn.Module):
             Chem.MolToSmiles(cur_mol)
             if cur_mol is not None else None
         )
-
+        
     def dfs_assemble(
         self, y_tree_mess, x_mol_vecs, all_nodes, cur_mol, global_amap,
         fa_amap, cur_node, fa_node, prob_decode, check_aroma
@@ -448,7 +448,7 @@ class JTNNVAE(nn.Module):
 
             if new_mol is None:
                 continue
-
+            
             has_error = False
             for nei_node in children:
                 if nei_node.is_leaf:
@@ -458,7 +458,7 @@ class JTNNVAE(nn.Module):
                     new_global_amap, pred_amap, nei_node, cur_node,
                     prob_decode, check_aroma
                 )
-                if tmp_mol is None:
+                if tmp_mol is None: 
                     has_error = True
                     if i == 0:
                         pre_mol = tmp_mol2

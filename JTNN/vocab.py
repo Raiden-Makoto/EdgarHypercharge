@@ -48,7 +48,7 @@ class Vocab(object):
             s for s in smiles_list
             if s.count('=') >= 2 and Chem.MolFromSmiles(s).GetNumAtoms() == 5
         ] + ['C1=NCCN1', 'C1=NNCC1']
-
+        
     def get_index(self, smiles):
         """Get the index of a SMILES string in the vocabulary."""
         return self.vmap[smiles]

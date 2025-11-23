@@ -95,7 +95,11 @@ def copy_edit_mol(mol):
 
 def get_clique_mol(mol, atoms):
     """Extract a molecule fragment for the given atom indices."""
-    smiles = Chem.MolFragmentToSmiles(mol, atoms, kekuleSmiles=True)
+    try:
+        smiles = Chem.MolFragmentToSmiles(mol, atoms, kekuleSmiles=True)
+    except:
+        # Fall back to non-kekule SMILES if kekulization fails
+        smiles = Chem.MolFragmentToSmiles(mol, atoms, kekuleSmiles=False)
     new_mol = Chem.MolFromSmiles(smiles, sanitize=False)
     new_mol = copy_edit_mol(new_mol).GetMol()
     new_mol = sanitize(new_mol)  # We assume this is not None

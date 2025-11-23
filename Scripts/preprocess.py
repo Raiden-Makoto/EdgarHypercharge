@@ -5,6 +5,7 @@ Converts SMILES strings to molecular tree structures.
 
 from multiprocessing import Pool
 import argparse
+import os
 from JTNN.moltree import MolTree
 import pickle
 import rdkit
@@ -19,22 +20,26 @@ def tensorize(smiles, assm=True):
         assm: Whether to assemble candidates
     
     Returns:
-        MolTree object with molecules removed (for serialization)
+        MolTree object with molecules removed (for serialization), or None if error
     """
-    mol_tree = MolTree(smiles)
-    mol_tree.recover()
-    if assm:
-        mol_tree.assemble()
+    try:
+        mol_tree = MolTree(smiles)
+        mol_tree.recover()
+        if assm:
+            mol_tree.assemble()
+            for node in mol_tree.nodes:
+                if node.label not in node.cands:
+                    node.cands.append(node.label)
+
+        # Remove RDKit molecule objects for serialization
+        del mol_tree.mol
         for node in mol_tree.nodes:
-            if node.label not in node.cands:
-                node.cands.append(node.label)
+            del node.mol
 
-    # Remove RDKit molecule objects for serialization
-    del mol_tree.mol
-    for node in mol_tree.nodes:
-        del node.mol
-
-    return mol_tree
+        return mol_tree
+    except Exception:
+        # Return None for invalid SMILES - will be filtered out
+        return None
 
 
 if __name__ == "__main__":
@@ -69,8 +74,18 @@ if __name__ == "__main__":
         ]
 
     print(f"Processing {len(data)} SMILES strings...")
-    all_data = pool.map(tensorize, data)
+    results = pool.map(tensorize, data)
+    # Filter out None results (invalid SMILES)
+    all_data = [r for r in results if r is not None]
+    skipped = len(results) - len(all_data)
+    if skipped > 0:
+        print(f"Skipped {skipped} invalid SMILES strings")
     print(f"Processed {len(all_data)} molecular trees")
+
+    # Create output directory
+    output_dir = "data/processed"
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"Saving preprocessed data to {output_dir}/")
 
     # Calculate split size (ceiling division)
     le = (len(all_data) + num_splits - 1) // num_splits
@@ -79,7 +94,7 @@ if __name__ == "__main__":
         st = split_id * le
         sub_data = all_data[st:st + le]
 
-        output_file = f'tensors-{split_id}.pkl'
+        output_file = os.path.join(output_dir, f'tensors-{split_id}.pkl')
         with open(output_file, 'wb') as f:
             pickle.dump(sub_data, f, pickle.HIGHEST_PROTOCOL)
         print(f"Saved {len(sub_data)} trees to {output_file}")

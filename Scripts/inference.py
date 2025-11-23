@@ -10,7 +10,7 @@ import numpy as np
 from JTNN import Vocab, JTNNVAE
 import rdkit
 
-lg = rdkit.RDLogger.logger()
+lg = rdkit.RDLogger.logger() 
 lg.setLevel(rdkit.RDLogger.CRITICAL)
 
 parser = argparse.ArgumentParser(
@@ -55,7 +55,7 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
-
+   
 # Load vocabulary
 print("Loading vocabulary...")
 with open(args.vocab, 'r') as f:

@@ -170,8 +170,8 @@ class JTNNDecoder(nn.Module):
 
             # Clique embedding
             cur_x = create_var(mx.array(cur_x, dtype=mx.int32))
-            cur_x = self.embedding(cur_x)
-
+            cur_x = self.embedding(cur_x) 
+            
             # Message passing
             cur_h_nei = mx.stack(cur_h_nei, axis=0)
             cur_h_nei = mx.reshape(
@@ -196,7 +196,7 @@ class JTNNDecoder(nn.Module):
                 node_y.neighbors.append(node_x)
                 if direction == 1:
                     pred_target.append(node_y.wid)
-                    pred_list.append(i)
+                    pred_list.append(i) 
                 stop_target.append(direction)
 
             # Hidden states for stop prediction
@@ -205,7 +205,7 @@ class JTNNDecoder(nn.Module):
             stop_hiddens.append(stop_hidden)
             stop_contexts.append(cur_batch)
             stop_targets.extend(stop_target)
-
+            
             # Hidden states for clique prediction
             if len(pred_list) > 0:
                 batch_list = [batch_list[i] for i in pred_list]
@@ -230,7 +230,7 @@ class JTNNDecoder(nn.Module):
             cur_o_nei.extend([padding] * pad_len)
 
         cur_x = create_var(mx.array(cur_x, dtype=mx.int32))
-        cur_x = self.embedding(cur_x)
+        cur_x = self.embedding(cur_x) 
         cur_o_nei = mx.stack(cur_o_nei, axis=0)
         cur_o_nei = mx.reshape(cur_o_nei, (-1, MAX_NB, self.hidden_size))
         cur_o = mx.sum(cur_o_nei, axis=1)
@@ -267,7 +267,7 @@ class JTNNDecoder(nn.Module):
         )
         stop_scores = mx.squeeze(stop_scores, axis=-1)
         stop_targets = create_var(mx.array(stop_targets, dtype=mx.float32))
-
+        
         stop_loss = bce_with_logits_loss(stop_scores, stop_targets) / len(mol_batch)
         stops = mx.greater_equal(stop_scores, mx.zeros_like(stop_scores)).astype(mx.float32)
         stop_acc = mx.equal(stops, stop_targets).astype(mx.float32)
@@ -277,7 +277,7 @@ class JTNNDecoder(nn.Module):
             pred_loss.item(), stop_loss.item(),
             pred_acc.item(), stop_acc.item()
         )
-
+    
     def decode(self, x_tree_vecs, prob_decode):
         """
         Decode a molecular tree from tree vectors.
@@ -335,14 +335,14 @@ class JTNNDecoder(nn.Module):
             stop_score = self.aggregate(
                 stop_hiddens, contexts, x_tree_vecs, 'stop'
             )
-
+            
             if prob_decode:
                 # Sample from Bernoulli distribution
                 prob = mx.sigmoid(stop_score)
                 sample = mx.random.bernoulli(prob)
                 backtrack = (sample.item() == 0)
             else:
-                backtrack = (stop_score.item() < 0)
+                backtrack = (stop_score.item() < 0) 
 
             if not backtrack:  # Forward: Predict next clique
                 new_h = GRU(
@@ -384,7 +384,7 @@ class JTNNDecoder(nn.Module):
                     all_nodes.append(node_y)
 
             if backtrack:  # Backtrack, use if instead of else
-                if len(stack) == 1:
+                if len(stack) == 1: 
                     break  # At root, terminate
 
                 node_fa, _ = stack[-2]

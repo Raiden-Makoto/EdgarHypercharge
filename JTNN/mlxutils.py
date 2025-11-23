@@ -130,7 +130,7 @@ def flatten_tensor(tensor, scope):
     return mx.concatenate(tlist, axis=0)
 
 
-def inflate_tensor(tensor, scope):
+def inflate_tensor(tensor, scope): 
     """
     Convert 2D matrix to 3D padded tensor.
     
@@ -159,7 +159,7 @@ def inflate_tensor(tensor, scope):
                 cur_vecs = mx.pad(cur_vecs, pad_width, mode='constant')
         
         batch_vecs.append(cur_vecs)
-    
+
     return mx.stack(batch_vecs, axis=0)
 
 
@@ -186,7 +186,7 @@ def GRU(x, h_nei, W_z, W_r, U_r, W_h):
     # Update gate
     z_input = mx.concatenate([x, sum_h], axis=1)
     z = mx.sigmoid(W_z(z_input))
-    
+
     # Reset gate
     r_1 = mx.reshape(W_r(x), (-1, 1, hidden_size))
     r_2 = U_r(h_nei)

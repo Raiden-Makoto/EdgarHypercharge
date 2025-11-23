@@ -15,7 +15,7 @@ from JTNN import Vocab, JTNNVAE
 from JTNN.datautils import MolTreeFolder
 import rdkit
 
-lg = rdkit.RDLogger.logger()
+lg = rdkit.RDLogger.logger() 
 lg.setLevel(rdkit.RDLogger.CRITICAL)
 
 parser = argparse.ArgumentParser(
@@ -72,7 +72,7 @@ def init_params(model):
                 # This is tricky - parameters are immutable in MLX
                 # We'll skip bias initialization for now as MLX handles it
                 pass
-            else:
+    else:
                 # Weight matrices: Xavier normal initialization
                 # Xavier: std = sqrt(2 / (fan_in + fan_out))
                 fan_in, fan_out = param.shape[0], param.shape[1]

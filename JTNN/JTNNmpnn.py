@@ -15,7 +15,7 @@ ELEM_LIST = [
 ]
 
 ATOM_FDIM = len(ELEM_LIST) + 6 + 5 + 1
-BOND_FDIM = 5
+BOND_FDIM = 5 
 MAX_NB = 15
 
 
@@ -139,7 +139,7 @@ class JTMPN(nn.Module):
             mx.zeros_like(self.W_o(ainput)),
             self.W_o(ainput)
         )  # ReLU
-
+        
         mol_vecs = []
         for st, le in scope:
             # Extract slice and average
@@ -176,8 +176,8 @@ class JTMPN(nn.Module):
 
             for atom in mol.GetAtoms():
                 fatoms.append(atom_features(atom))
-                in_bonds.append([])
-
+                in_bonds.append([]) 
+        
             for bond in mol.GetBonds():
                 a1 = bond.GetBeginAtom()
                 a2 = bond.GetEndAtom()
@@ -207,10 +207,10 @@ class JTMPN(nn.Module):
                     if (y_bid, x_bid) in mess_dict:
                         mess_idx = mess_dict[(y_bid, x_bid)]
                         in_bonds[x].append(mess_idx)
-
+            
             scope.append((total_atoms, n_atoms))
             total_atoms += n_atoms
-
+        
         total_bonds = len(all_bonds)
         fatoms = mx.stack(fatoms, axis=0)
         fbonds = mx.stack(fbonds, axis=0)
