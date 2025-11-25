@@ -40,3 +40,8 @@ wheels/
 .DS_Store
 Thumbs.db
 
+# Model checkpoints and data
+models/
+*.pkl
+data/processed/
+

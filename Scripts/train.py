@@ -10,10 +10,13 @@ import sys
 import os
 import numpy as np
 import argparse
+import gc
+from tqdm import tqdm
 
 from JTNN import Vocab, JTNNVAE
 from JTNN.datautils import MolTreeFolder
 import rdkit
+import pickle
 
 lg = rdkit.RDLogger.logger() 
 lg.setLevel(rdkit.RDLogger.CRITICAL)
@@ -27,7 +30,7 @@ parser.add_argument('--save_dir', required=True, help='Directory to save models'
 parser.add_argument('--load_epoch', type=int, default=0, help='Epoch to load from')
 
 parser.add_argument('--hidden_size', type=int, default=32, help='Hidden size (default: 32 for ~100K params)')
-parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
 parser.add_argument('--latent_size', type=int, default=8, help='Latent size (default: 8 for ~100K params)')
 parser.add_argument('--depthT', type=int, default=3, help='Tree depth (default: 3 for ~100K params)')
 parser.add_argument('--depthG', type=int, default=2, help='Graph depth (default: 2 for ~100K params)')
@@ -44,7 +47,7 @@ parser.add_argument('--anneal_rate', type=float, default=0.9, help='LR anneal ra
 parser.add_argument('--anneal_iter', type=int, default=40000, help='LR anneal interval')
 parser.add_argument('--kl_anneal_iter', type=int, default=2000, help='KL anneal interval')
 parser.add_argument('--print_iter', type=int, default=50, help='Print interval')
-parser.add_argument('--save_iter', type=int, default=5000, help='Save interval')
+parser.add_argument('--save_iter', type=int, default=100, help='Save interval')
 
 args = parser.parse_args()
 print(args)
@@ -72,7 +75,7 @@ def init_params(model):
                 # This is tricky - parameters are immutable in MLX
                 # We'll skip bias initialization for now as MLX handles it
                 pass
-    else:
+            else:
                 # Weight matrices: Xavier normal initialization
                 # Xavier: std = sqrt(2 / (fan_in + fan_out))
                 fan_in, fan_out = param.shape[0], param.shape[1]
@@ -109,13 +112,19 @@ if args.load_epoch > 0:
 # Count parameters
 def count_parameters(model):
     """Count total number of parameters."""
-    total = 0
-    for param in model.parameters():
-        if isinstance(param, mx.array):
-            total += param.size
-        elif hasattr(param, 'size'):
-            total += param.size
-    return total
+    def count_recursive(params):
+        """Recursively count parameters."""
+        total = 0
+        if isinstance(params, dict):
+            for v in params.values():
+                total += count_recursive(v)
+        elif isinstance(params, (list, tuple)):
+            for item in params:
+                total += count_recursive(item)
+        elif isinstance(params, mx.array):
+            total += params.size
+        return total
+    return count_recursive(model.parameters())
 
 num_params = count_parameters(model)
 print(f"Model #Params: {num_params // 1000}K")
@@ -127,10 +136,19 @@ current_lr = args.lr
 # Helper functions for parameter and gradient norms
 def param_norm(model):
     """Compute parameter norm."""
-    total = 0.0
-    for param in model.parameters():
-        total += float(mx.sum(param * param).item())
-    return math.sqrt(total)
+    def compute_norm(params):
+        """Recursively compute parameter norm."""
+        total = 0.0
+        if isinstance(params, dict):
+            for v in params.values():
+                total += compute_norm(v)
+        elif isinstance(params, (list, tuple)):
+            for item in params:
+                total += compute_norm(item)
+        elif isinstance(params, mx.array):
+            total += float(mx.sum(params * params).item())
+        return total
+    return math.sqrt(compute_norm(model.parameters()))
 
 
 def clip_grad_norm(grads, max_norm):
@@ -219,9 +237,31 @@ def loss_fn(model, batch, beta_val):
 loss_and_grad_fn = mx.value_and_grad(loss_fn, argnums=0)
 
 for epoch in range(args.epoch):
-    loader = MolTreeFolder(args.train, vocab, args.batch_size, num_workers=4)
+    # Use only half the dataset by loading only half the files
+    # Count total files first
+    data_files = sorted([f for f in os.listdir(args.train) if f.endswith('.pkl')])
+    num_files = len(data_files)
+    max_files = num_files // 2  # Use half the files
+    
+    # Estimate total batches - sample first file to estimate, then multiply
+    # This avoids loading all files just to count
+    if len(data_files) > 0:
+        sample_file = os.path.join(args.train, data_files[0])
+        with open(sample_file, 'rb') as f:
+            sample_data = pickle.load(f)
+            samples_per_file = len(sample_data)
+        total_samples = samples_per_file * max_files
+        total_batches = total_samples // args.batch_size
+    else:
+        total_batches = None
+    
+    loader = MolTreeFolder(args.train, vocab, args.batch_size, num_workers=4, max_files=max_files)
+    
+    # Use simple progress tracking instead of tqdm for better compatibility
+    batch_count = 0
     for batch in loader:
         total_step += 1
+        batch_count += 1
         try:
             # Forward and backward pass
             (loss, metrics), grads = loss_and_grad_fn(model, batch, beta)
@@ -233,7 +273,27 @@ for epoch in range(args.epoch):
             
             # Update parameters
             optimizer.update(model, grads)
-            mx.eval(model.parameters())
+            # Don't force synchronous eval every batch - let MLX handle async execution
+            # Only evaluate loss periodically for progress bar to avoid blocking GPU
+            
+            # Update progress bar every batch
+            # Only evaluate loss every 10 steps to avoid blocking async execution
+            if total_step % 10 == 0:  # Evaluate loss every 10 steps for progress bar
+                mx.eval(loss)  # Only evaluate loss, not all parameters
+                loss_val = float(loss.item()) if hasattr(loss, 'item') else float(loss)
+            else:
+                loss_val = "..."  # Don't evaluate every step
+            
+            # Print progress every 10 batches - use newline so it's visible
+            if batch_count % 10 == 0:
+                progress_pct = (batch_count / total_batches * 100) if total_batches else 0
+                loss_str = f'{loss_val:.4f}' if isinstance(loss_val, float) else str(loss_val)
+                print(f"Epoch {epoch+1}/{args.epoch}: [{batch_count}/{total_batches}] ({progress_pct:.1f}%) | "
+                      f"Loss={loss_str} | KL={kl_div:.4f} | WAcc={wacc*100:.1f}% | TAcc={tacc*100:.1f}% | SAcc={sacc*100:.1f}% | Beta={beta:.3f}",
+                      flush=True)
+            
+            # Explicitly delete batch and gradients to free memory
+            del batch, grads, loss, metrics
             
         except Exception as e:
             print(f"Error at step {total_step}: {e}")
@@ -244,18 +304,22 @@ for epoch in range(args.epoch):
         meters = meters + np.array([kl_div, wacc * 100, tacc * 100, sacc * 100])
 
         if total_step % args.print_iter == 0:
+            # Force evaluation only when we need detailed metrics
+            mx.eval(model.parameters())
             meters /= args.print_iter
             pnorm = param_norm(model)
             gnorm = last_grad_norm
-            print(
+            # Print detailed metrics to console (tqdm will handle the progress bar)
+            tqdm.write(
                 "[%d] Beta: %.3f, KL: %.2f, Word: %.2f, Topo: %.2f, "
                 "Assm: %.2f, PNorm: %.2f, GNorm: %.2f, LR: %.6f" % (
                     total_step, beta, meters[0], meters[1], meters[2],
                     meters[3], pnorm, gnorm, current_lr
                 )
             )
-            sys.stdout.flush()
             meters *= 0
+            # Periodic garbage collection to free memory
+            gc.collect()
 
         if total_step % args.save_iter == 0:
             checkpoint_path = os.path.join(
@@ -264,6 +328,8 @@ for epoch in range(args.epoch):
             # Save model weights using MLX's save_weights method
             model.save_weights(checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
+            # Force garbage collection after saving
+            gc.collect()
 
         if total_step % args.anneal_iter == 0:
             current_lr *= args.anneal_rate
@@ -272,5 +338,8 @@ for epoch in range(args.epoch):
 
         if total_step % args.kl_anneal_iter == 0 and total_step >= args.warmup:
             beta = min(args.max_beta, beta + args.step_beta)
+    
+    # Print epoch completion
+    print(f"\nEpoch {epoch+1}/{args.epoch} complete! Processed {batch_count} batches.")
 
 print("Training complete!")
