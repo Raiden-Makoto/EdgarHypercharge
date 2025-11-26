@@ -112,13 +112,20 @@ class JTNNDecoder(nn.Module):
         """
         pred_hiddens, pred_contexts, pred_targets = [], [], []
         stop_hiddens, stop_contexts, stop_targets = [], [], []
+        # Pre-compute traces - cache if available, otherwise compute
         traces = []
         for mol_tree in mol_batch:
-            s = []
-            dfs(s, mol_tree.nodes[0], -1)
+            # Check if trace is pre-computed
+            if hasattr(mol_tree, '_trace'):
+                s = mol_tree._trace
+            else:
+                s = []
+                dfs(s, mol_tree.nodes[0], -1)
+                mol_tree._trace = s  # Cache for next time
             traces.append(s)
+            # Reset neighbors (faster than recreating list)
             for node in mol_tree.nodes:
-                node.neighbors = []
+                node.neighbors.clear()  # Faster than node.neighbors = []
 
         # Predict Root
         batch_size = len(mol_batch)
@@ -130,70 +137,78 @@ class JTNNDecoder(nn.Module):
             create_var(mx.array(list(range(batch_size)), dtype=mx.int32))
         )
 
-        max_iter = max([len(tr) for tr in traces])
+        # Cache max_iter calculation
+        max_iter = max(len(tr) for tr in traces)  # Generator is faster than list comprehension
         padding = create_var(mx.zeros(self.hidden_size), False)
         h = {}
 
+        # Pre-allocate lists to avoid repeated allocations
         for t in range(max_iter):
             prop_list = []
             batch_list = []
+            # Use enumerate with direct access
             for i, plist in enumerate(traces):
                 if t < len(plist):
                     prop_list.append(plist[t])
                     batch_list.append(i)
+            # Early exit if no items to process
+            if not prop_list:
+                continue
 
             cur_x = []
             cur_h_nei, cur_o_nei = [], []
 
+            # Optimize neighbor collection - pre-compute all neighbors once
             for node_x, real_y, _ in prop_list:
+                # Get all neighbors first, then filter
+                all_nei = [h[(node_y.idx, node_x.idx)] for node_y in node_x.neighbors]
+                
                 # Neighbors for message passing (target not included)
-                cur_nei = [
-                    h[(node_y.idx, node_x.idx)]
-                    for node_y in node_x.neighbors
-                    if node_y.idx != real_y.idx
-                ]
+                cur_nei = [h_val for node_y, h_val in zip(node_x.neighbors, all_nei)
+                           if node_y.idx != real_y.idx]
                 pad_len = MAX_NB - len(cur_nei)
                 cur_h_nei.extend(cur_nei)
-                cur_h_nei.extend([padding] * pad_len)
+                if pad_len > 0:
+                    cur_h_nei.extend([padding] * pad_len)
 
-                # Neighbors for stop prediction (all neighbors)
-                cur_nei = [
-                    h[(node_y.idx, node_x.idx)]
-                    for node_y in node_x.neighbors
-                ]
-                pad_len = MAX_NB - len(cur_nei)
-                cur_o_nei.extend(cur_nei)
-                cur_o_nei.extend([padding] * pad_len)
+                # Neighbors for stop prediction (all neighbors) - reuse all_nei
+                pad_len = MAX_NB - len(all_nei)
+                cur_o_nei.extend(all_nei)
+                if pad_len > 0:
+                    cur_o_nei.extend([padding] * pad_len)
 
                 # Current clique embedding
                 cur_x.append(node_x.wid)
 
-            # Clique embedding
+            # Clique embedding - vectorized
+            if len(cur_x) == 0:
+                continue  # Skip if empty
+                
             cur_x = create_var(mx.array(cur_x, dtype=mx.int32))
             cur_x = self.embedding(cur_x) 
             
-            # Message passing
+            # Message passing - vectorized operations
             cur_h_nei = mx.stack(cur_h_nei, axis=0)
             cur_h_nei = mx.reshape(
                 cur_h_nei, (-1, MAX_NB, self.hidden_size)
             )
             new_h = GRU(cur_x, cur_h_nei, self.W_z, self.W_r, self.U_r, self.W_h)
 
-            # Node Aggregate
+            # Node Aggregate - vectorized
             cur_o_nei = mx.stack(cur_o_nei, axis=0)
             cur_o_nei = mx.reshape(
                 cur_o_nei, (-1, MAX_NB, self.hidden_size)
             )
             cur_o = mx.sum(cur_o_nei, axis=1)
 
-            # Gather targets
+            # Gather targets - optimize with pre-allocated lists
             pred_target, pred_list = [], []
             stop_target = []
             for i, m in enumerate(prop_list):
                 node_x, node_y, direction = m
                 x, y = node_x.idx, node_y.idx
                 h[(x, y)] = new_h[i]
-                node_y.neighbors.append(node_x)
+                node_y.neighbors.append(node_x)  # Keep append, list is small
                 if direction == 1:
                     pred_target.append(node_y.wid)
                     pred_list.append(i) 

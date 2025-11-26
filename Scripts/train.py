@@ -11,6 +11,7 @@ import os
 import numpy as np
 import argparse
 import gc
+import time
 from tqdm import tqdm
 
 from JTNN import Vocab, JTNNVAE
@@ -29,8 +30,8 @@ parser.add_argument('--vocab', required=True, help='Vocabulary file')
 parser.add_argument('--save_dir', required=True, help='Directory to save models')
 parser.add_argument('--load_epoch', type=int, default=0, help='Epoch to load from')
 
-parser.add_argument('--hidden_size', type=int, default=32, help='Hidden size (default: 32 for ~100K params)')
-parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
+parser.add_argument('--hidden_size', type=int, default=24, help='Hidden size (default: 24 for balanced capacity)')
+parser.add_argument('--batch_size', type=int, default=32, help='Batch size (JTNN default)')
 parser.add_argument('--latent_size', type=int, default=8, help='Latent size (default: 8 for ~100K params)')
 parser.add_argument('--depthT', type=int, default=3, help='Tree depth (default: 3 for ~100K params)')
 parser.add_argument('--depthG', type=int, default=2, help='Graph depth (default: 2 for ~100K params)')
@@ -40,14 +41,13 @@ parser.add_argument('--clip_norm', type=float, default=50.0, help='Gradient clip
 parser.add_argument('--beta', type=float, default=0.0, help='Initial KL weight')
 parser.add_argument('--step_beta', type=float, default=0.002, help='KL weight step')
 parser.add_argument('--max_beta', type=float, default=1.0, help='Max KL weight')
-parser.add_argument('--warmup', type=int, default=40000, help='Warmup steps')
+parser.add_argument('--warmup', type=int, default=700, help='Warmup steps (default: 700 = first 2 epochs)')
 
 parser.add_argument('--epoch', type=int, default=20, help='Number of epochs')
 parser.add_argument('--anneal_rate', type=float, default=0.9, help='LR anneal rate')
-parser.add_argument('--anneal_iter', type=int, default=40000, help='LR anneal interval')
+parser.add_argument('--anneal_iter', type=int, default=4000, help='LR anneal interval (JTNN default)')
 parser.add_argument('--kl_anneal_iter', type=int, default=2000, help='KL anneal interval')
-parser.add_argument('--print_iter', type=int, default=50, help='Print interval')
-parser.add_argument('--save_iter', type=int, default=100, help='Save interval')
+parser.add_argument('--print_iter', type=int, default=350, help='Print interval')
 
 args = parser.parse_args()
 print(args)
@@ -94,16 +94,21 @@ def init_params(model):
 
 init_params(model)
 
-# Load checkpoint if specified
+# Load checkpoint if specified (epoch-based)
+# When resuming from epoch N, load checkpoint from epoch N-1 (last completed)
+start_epoch = 0
 if args.load_epoch > 0:
+    # Load from the previous epoch (the last completed checkpoint)
+    load_checkpoint_epoch = args.load_epoch - 1
     checkpoint_path = os.path.join(
-        args.save_dir, f"model.iter-{args.load_epoch}.npz"
+        args.save_dir, f"model.epoch-{load_checkpoint_epoch}.npz"
     )
     if os.path.exists(checkpoint_path):
         try:
             weights = mx.load(checkpoint_path)
             model.load_weights(weights)
-            print(f"Loaded checkpoint from {checkpoint_path}")
+            start_epoch = args.load_epoch  # Start training from the specified epoch
+            print(f"Loaded checkpoint from epoch {load_checkpoint_epoch}, resuming from epoch {start_epoch}")
         except Exception as e:
             print(f"Warning: Could not load checkpoint: {e}")
     else:
@@ -218,8 +223,30 @@ def grad_norm(grads):
 
 
 # Training loop
-total_step = args.load_epoch
+# Calculate total_step and beta based on resume epoch
+total_step = 0
+if start_epoch > 0:
+    # Estimate batches per epoch from first file
+    data_files = sorted([f for f in os.listdir(args.train) if f.endswith('.pkl')])
+    if len(data_files) > 0:
+        sample_file = os.path.join(args.train, data_files[0])
+        with open(sample_file, 'rb') as f:
+            sample_data = pickle.load(f)
+            samples_per_file = len(sample_data)
+        num_files = len(data_files)
+        max_files = num_files // 2
+        total_samples = samples_per_file * max_files
+        batches_per_epoch = total_samples // args.batch_size
+        total_step = start_epoch * batches_per_epoch
+
+# Calculate beta based on current step (don't reset to args.beta!)
 beta = args.beta
+if total_step >= args.warmup:
+    # Calculate how many KL annealing steps have occurred
+    kl_steps = (total_step - args.warmup) // args.kl_anneal_iter
+    beta = min(args.max_beta, args.beta + kl_steps * args.step_beta)
+    print(f"Resuming: total_step={total_step}, beta={beta:.6f} (calculated from step count)")
+
 meters = np.zeros(4)
 last_grad_norm = 0.0
 
@@ -236,7 +263,10 @@ def loss_fn(model, batch, beta_val):
 # value_and_grad returns (value, gradients) where gradients match model structure
 loss_and_grad_fn = mx.value_and_grad(loss_fn, argnums=0)
 
-for epoch in range(args.epoch):
+for epoch in range(start_epoch, args.epoch):
+    # Start timing for this epoch
+    epoch_start_time = time.time()
+    
     # Use only half the dataset by loading only half the files
     # Count total files first
     data_files = sorted([f for f in os.listdir(args.train) if f.endswith('.pkl')])
@@ -254,6 +284,8 @@ for epoch in range(args.epoch):
         total_batches = total_samples // args.batch_size
     else:
         total_batches = None
+
+    # total_step already calculated above if resuming, no need to recalculate
     
     loader = MolTreeFolder(args.train, vocab, args.batch_size, num_workers=4, max_files=max_files)
     
@@ -276,16 +308,16 @@ for epoch in range(args.epoch):
             # Don't force synchronous eval every batch - let MLX handle async execution
             # Only evaluate loss periodically for progress bar to avoid blocking GPU
             
-            # Update progress bar every batch
-            # Only evaluate loss every 10 steps to avoid blocking async execution
-            if total_step % 10 == 0:  # Evaluate loss every 10 steps for progress bar
+            # Only evaluate loss when needed for printing (every 50 batches)
+            # Skip evaluation entirely otherwise to avoid blocking
+            if args.print_iter > 0 and batch_count % args.print_iter == 0:
                 mx.eval(loss)  # Only evaluate loss, not all parameters
                 loss_val = float(loss.item()) if hasattr(loss, 'item') else float(loss)
             else:
                 loss_val = "..."  # Don't evaluate every step
             
-            # Print progress every 10 batches - use newline so it's visible
-            if batch_count % 10 == 0:
+            # Print progress every 50 batches - use newline so it's visible
+            if args.print_iter > 0 and batch_count % args.print_iter == 0:
                 progress_pct = (batch_count / total_batches * 100) if total_batches else 0
                 loss_str = f'{loss_val:.4f}' if isinstance(loss_val, float) else str(loss_val)
                 print(f"Epoch {epoch+1}/{args.epoch}: [{batch_count}/{total_batches}] ({progress_pct:.1f}%) | "
@@ -321,16 +353,6 @@ for epoch in range(args.epoch):
             # Periodic garbage collection to free memory
             gc.collect()
 
-        if total_step % args.save_iter == 0:
-            checkpoint_path = os.path.join(
-                args.save_dir, f"model.iter-{total_step}.npz"
-            )
-            # Save model weights using MLX's save_weights method
-            model.save_weights(checkpoint_path)
-            print(f"Saved checkpoint to {checkpoint_path}")
-            # Force garbage collection after saving
-            gc.collect()
-
         if total_step % args.anneal_iter == 0:
             current_lr *= args.anneal_rate
             optimizer.learning_rate = current_lr
@@ -339,7 +361,20 @@ for epoch in range(args.epoch):
         if total_step % args.kl_anneal_iter == 0 and total_step >= args.warmup:
             beta = min(args.max_beta, beta + args.step_beta)
     
-    # Print epoch completion
-    print(f"\nEpoch {epoch+1}/{args.epoch} complete! Processed {batch_count} batches.")
+    # Calculate and print epoch completion with timing
+    epoch_end_time = time.time()
+    epoch_elapsed = epoch_end_time - epoch_start_time
+    epoch_minutes = int(epoch_elapsed // 60)
+    epoch_seconds = int(epoch_elapsed % 60)
+    print(f"\nEpoch {epoch+1}/{args.epoch} complete! Processed {batch_count} batches. "
+          f"Time elapsed: {epoch_minutes}m {epoch_seconds}s ({epoch_elapsed:.1f}s)")
+
+    # Save checkpoint once per epoch
+    checkpoint_path = os.path.join(
+        args.save_dir, f"model.epoch-{epoch+1}.npz"
+    )
+    model.save_weights(checkpoint_path)
+    print(f"Saved checkpoint to {checkpoint_path}")
+    gc.collect()
 
 print("Training complete!")

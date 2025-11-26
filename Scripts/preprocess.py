@@ -23,27 +23,27 @@ def tensorize(smiles, assm=True):
         MolTree object with molecules removed (for serialization), or None if error
     """
     try:
-        mol_tree = MolTree(smiles)
-        mol_tree.recover()
-        if assm:
-            mol_tree.assemble()
-            for node in mol_tree.nodes:
-                if node.label not in node.cands:
-                    node.cands.append(node.label)
+    mol_tree = MolTree(smiles)
+    mol_tree.recover()
+    if assm:
+        mol_tree.assemble()
+        for node in mol_tree.nodes:
+            if node.label not in node.cands:
+                node.cands.append(node.label)
 
         # Remove RDKit molecule objects for serialization
-        del mol_tree.mol
-        for node in mol_tree.nodes:
-            del node.mol
+    del mol_tree.mol
+    for node in mol_tree.nodes:
+        del node.mol
 
-        return mol_tree
+    return mol_tree
     except Exception:
         # Return None for invalid SMILES - will be filtered out
         return None
 
 
 if __name__ == "__main__":
-    lg = rdkit.RDLogger.logger()
+    lg = rdkit.RDLogger.logger() 
     lg.setLevel(rdkit.RDLogger.CRITICAL)
 
     parser = argparse.ArgumentParser(

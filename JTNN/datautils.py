@@ -85,7 +85,7 @@ class MolTreeFolder(object):
 
     def __init__(
         self, data_folder, vocab, batch_size, num_workers=4,
-        shuffle=True, assm=True, replicate=None
+        shuffle=True, assm=True, replicate=None, max_files=None
     ):
         """
         Initialize MolTreeFolder.
@@ -98,9 +98,12 @@ class MolTreeFolder(object):
             shuffle: Whether to shuffle data
             assm: Whether to include assembly information
             replicate: Number of times to replicate data files
+            max_files: Maximum number of files to load (None = all files)
         """
         self.data_folder = data_folder
-        self.data_files = [fn for fn in os.listdir(data_folder)]
+        self.data_files = sorted([fn for fn in os.listdir(data_folder) if fn.endswith('.pkl')])
+        if max_files is not None:
+            self.data_files = self.data_files[:max_files]
         self.batch_size = batch_size
         self.vocab = vocab
         self.num_workers = num_workers  # Kept for compatibility
@@ -120,18 +123,18 @@ class MolTreeFolder(object):
             if self.shuffle:
                 random.shuffle(data)  # Shuffle data before batch
 
-            batches = [
-                data[i:i + self.batch_size]
-                for i in range(0, len(data), self.batch_size)
-            ]
-            if len(batches[-1]) < self.batch_size:
-                batches.pop()
-
-            # Process batches directly (no DataLoader needed)
-            for batch in batches:
+            # Process batches one at a time to save memory
+            # Don't create all batches upfront
+            for i in range(0, len(data), self.batch_size):
+                batch = data[i:i + self.batch_size]
+                if len(batch) < self.batch_size:
+                    break  # Skip incomplete batches
                 yield tensorize(batch, self.vocab, assm=self.assm)
+                # Explicitly delete batch to free memory
+                del batch
 
-            del data, batches
+            # Free data immediately after processing file
+            del data
 
 
 class PairTreeDataset(object):
@@ -218,16 +221,15 @@ def tensorize(tree_batch, vocab, assm=True):
     if assm is False:
         return tree_batch, jtenc_holder, mpn_holder
 
+    # Optimize candidate collection with list comprehensions
     cands = []
     batch_idx = []
     for i, mol_tree in enumerate(tree_batch):
-        for node in mol_tree.nodes:
-            # Leaf node's attachment is determined by neighboring node's attachment
-            if node.is_leaf or len(node.cands) == 1:
-                continue
-            cands.extend([
-                (cand, mol_tree.nodes, node) for cand in node.cands
-            ])
+        # Pre-filter nodes to avoid repeated checks
+        nodes_with_cands = [node for node in mol_tree.nodes 
+                           if not node.is_leaf and len(node.cands) > 1]
+        for node in nodes_with_cands:
+            cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
             batch_idx.extend([i] * len(node.cands))
 
     # Handle case where there are no candidates
@@ -245,14 +247,16 @@ def tensorize(tree_batch, vocab, assm=True):
 def set_batch_nodeID(mol_batch, vocab):
     """
     Set node IDs and word IDs for all nodes in a batch.
+    Optimized to reduce function call overhead.
     
     Args:
         mol_batch: List of MolTree objects
         vocab: Vocabulary object
     """
     tot = 0
+    get_index = vocab.get_index  # Cache method lookup
     for mol_tree in mol_batch:
         for node in mol_tree.nodes:
             node.idx = tot
-            node.wid = vocab.get_index(node.smiles)
+            node.wid = get_index(node.smiles)  # Use cached method
             tot += 1

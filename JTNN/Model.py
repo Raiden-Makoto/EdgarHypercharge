@@ -79,7 +79,7 @@ class JTNNVAE(nn.Module):
             mol_vecs = mx.zeros((tree_vecs.shape[0], self.hidden_size))
         else:
             # If MPN is implemented, use it here
-        mol_vecs = self.mpn(*mpn_holder)
+            mol_vecs = self.mpn(*mpn_holder)
         return tree_vecs, tree_mess, mol_vecs
     
     def encode_from_smiles(self, smiles_list):
@@ -115,7 +115,7 @@ class JTNNVAE(nn.Module):
         if mpn_holder is None:
             mol_vecs = mx.zeros((tree_vecs.shape[0], self.hidden_size))
         else:
-        mol_vecs = self.mpn(*mpn_holder)
+            mol_vecs = self.mpn(*mpn_holder)
         tree_mean = self.T_mean(tree_vecs)
         mol_mean = self.G_mean(mol_vecs)
         tree_var = -mx.abs(self.T_var(tree_vecs))
@@ -238,18 +238,21 @@ class JTNNVAE(nn.Module):
         cnt, tot, acc = 0, 0, 0
         all_loss = []
         for i, mol_tree in enumerate(mol_batch):
-            comp_nodes = [
-                node for node in mol_tree.nodes
-                if len(node.cands) > 1 and not node.is_leaf
-            ]
+            # Pre-filter nodes once
+            comp_nodes = [node for node in mol_tree.nodes
+                         if len(node.cands) > 1 and not node.is_leaf]
             cnt += len(comp_nodes)
             for node in comp_nodes:
-                label = node.cands.index(node.label)
-                ncand = len(node.cands)
+                # Cache node.cands to avoid repeated attribute access
+                node_cands = node.cands
+                label = node_cands.index(node.label)
+                ncand = len(node_cands)
                 cur_score = scores[tot:tot + ncand]
                 tot += ncand
 
-                if cur_score[label].item() >= mx.max(cur_score).item():
+                # Optimize max comparison
+                cur_max = mx.max(cur_score)
+                if float(cur_score[label].item()) >= float(cur_max.item()):
                     acc += 1
 
                 # Cross entropy loss for single prediction

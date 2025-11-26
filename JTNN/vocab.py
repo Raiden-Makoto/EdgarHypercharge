@@ -8,6 +8,8 @@ import rdkit.Chem as Chem
 def get_slots(smiles):
     """Extract atom slots (symbol, formal charge, total H count) from SMILES."""
     mol = Chem.MolFromSmiles(smiles)
+    if mol is None:
+        return []  # Return empty list for invalid SMILES
     return [
         (atom.GetSymbol(), atom.GetFormalCharge(), atom.GetTotalNumHs())
         for atom in mol.GetAtoms()
@@ -40,13 +42,13 @@ class Vocab(object):
         # Update benzynes: 6-atom rings with >= 2 double bonds
         Vocab.benzynes = [
             s for s in smiles_list
-            if s.count('=') >= 2 and Chem.MolFromSmiles(s).GetNumAtoms() == 6
+            if s.count('=') >= 2 and Chem.MolFromSmiles(s) is not None and Chem.MolFromSmiles(s).GetNumAtoms() == 6
         ] + ['C1=CCNCC1']
         
         # Update penzynes: 5-atom rings with >= 2 double bonds
         Vocab.penzynes = [
             s for s in smiles_list
-            if s.count('=') >= 2 and Chem.MolFromSmiles(s).GetNumAtoms() == 5
+            if s.count('=') >= 2 and Chem.MolFromSmiles(s) is not None and Chem.MolFromSmiles(s).GetNumAtoms() == 5
         ] + ['C1=NCCN1', 'C1=NNCC1']
         
     def get_index(self, smiles):

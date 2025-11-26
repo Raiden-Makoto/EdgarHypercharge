@@ -22,7 +22,7 @@ class MolTreeNode(object):
 
         self.clique = [x for x in clique] if clique is not None else []
         self.neighbors = []
-
+        
     def add_neighbor(self, nei_node):
         """Add a neighbor node to this node."""
         self.neighbors.append(nei_node)
@@ -55,9 +55,13 @@ class MolTreeNode(object):
             original_mol.GetAtomWithIdx(cidx).SetAtomMapNum(0)
 
         return self.label
-
+    
     def assemble(self):
         """Assemble candidate molecules for this node."""
+        # Check if already assembled (cached)
+        if hasattr(self, '_cands_cached') and self._cands_cached:
+            return
+        
         neighbors = [
             nei for nei in self.neighbors
             if nei.mol.GetNumAtoms() > 1
@@ -85,6 +89,9 @@ class MolTreeNode(object):
             self.cands = list(self.cands)
         else:
             self.cands = []
+        
+        # Mark as cached
+        self._cands_cached = True
 
 
 class MolTree(object):
@@ -114,7 +121,7 @@ class MolTree(object):
         for x, y in edges:
             self.nodes[x].add_neighbor(self.nodes[y])
             self.nodes[y].add_neighbor(self.nodes[x])
-
+        
         if root > 0:
             self.nodes[0], self.nodes[root] = (
                 self.nodes[root], self.nodes[0]
@@ -158,7 +165,7 @@ if __name__ == "__main__":
     # Suppress all warnings
     warnings.filterwarnings('ignore')
     
-    lg = rdkit.RDLogger.logger()
+    lg = rdkit.RDLogger.logger() 
     lg.setLevel(rdkit.RDLogger.CRITICAL)
 
     cset = set()

@@ -30,8 +30,8 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    '--hidden_size', type=int, default=32,
-    help='Hidden size (default: 32 for ~100K params, must match training)'
+    '--hidden_size', type=int, default=24,
+    help='Hidden size (default: 24, must match training configuration)'
 )
 parser.add_argument(
     '--latent_size', type=int, default=8,
